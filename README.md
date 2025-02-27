@@ -1,1 +1,1 @@
-# ciftci icn akiili cozumler
+# ciftci icin akilli cozumler
