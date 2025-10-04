@@ -4,10 +4,19 @@
 #include "driver/gpio.h"
 
 // Define the GPIO pins connected to the L298N driver
-#define IN1_PIN GPIO_NUM_5
-#define IN2_PIN GPIO_NUM_4
-#define IN3_PIN GPIO_NUM_0
-#define IN4_PIN GPIO_NUM_2
+
+
+
+//#define IN1_PIN GPIO_NUM_4  // D2 
+//#define IN2_PIN GPIO_NUM_5  // D1 
+//#define IN3_PIN GPIO_NUM_13 // D7 
+//#define IN4_PIN GPIO_NUM_12 // D6
+
+#define IN1_PIN GPIO_NUM_5  //D1
+#define IN2_PIN GPIO_NUM_4  //D2
+#define IN3_PIN GPIO_NUM_0  //D3
+#define IN4_PIN GPIO_NUM_16 //D8
+  //#define IN4_PIN GPIO_NUM_2  //D4 
 
 // Stepper motor parameters
 #define STEPS_PER_REVOLUTION 1000

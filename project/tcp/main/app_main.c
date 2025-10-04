@@ -50,14 +50,16 @@ typedef struct {
 
 
 // Define the GPIO pins connected to the L298N driver
-#define IN1_PIN GPIO_NUM_5
-#define IN2_PIN GPIO_NUM_4
-#define IN3_PIN GPIO_NUM_0
-#define IN4_PIN GPIO_NUM_2
+#define IN1_PIN GPIO_NUM_5  //D1
+#define IN2_PIN GPIO_NUM_4  //D2
+#define IN3_PIN GPIO_NUM_0  //D3
+#define IN4_PIN GPIO_NUM_16 //D0
+
+#define LED_BUILTIN_ESP GPIO_NUM_2 //D4
 
 // Stepper motor parameters
-#define STEPS_PER_REVOLUTION 1000
-#define STEP_DELAY_MS 15 // Adjust for desired speed
+#define STEPS_PER_REVOLUTION 100 //1000
+#define STEP_DELAY_MS 10 // Adjust for desired speed
 
 // Full-step sequence for a bipolar stepper motor
 const int full_step_sequence[4][4] =
@@ -68,6 +70,19 @@ const int full_step_sequence[4][4] =
     {0, 0, 0, 1}  // Step 4
 };
 
+int motor_parse_payload(const char *payload, char *command, int *value) 
+{
+    if (payload == NULL)
+     {
+        return 0;
+    }
+    // "%s %d" formatı: bir dizeyi (komut) ve bir tam sayıyı (değer) oku
+    // sscanf, başarıyla okunan değişken sayısını döndürür.
+    int result_count = sscanf(payload, "%s %d", command, value);
+
+    return result_count;
+}
+
 // Function to initialize GPIO pins
 void motor_gpio_init()
  {
@@ -75,6 +90,8 @@ void motor_gpio_init()
     gpio_set_direction(IN2_PIN, GPIO_MODE_OUTPUT);
     gpio_set_direction(IN3_PIN, GPIO_MODE_OUTPUT);
     gpio_set_direction(IN4_PIN, GPIO_MODE_OUTPUT);
+
+    gpio_set_direction(LED_BUILTIN_ESP, GPIO_MODE_OUTPUT);
 }
 
 // Function to perform a single step
@@ -114,11 +131,13 @@ void light_control_task(void *pvParameter)
             {
                 // Işığı aç
                 printf("Lamba aciliyor!\n");
+                gpio_set_level(LED_BUILTIN_ESP, 0);
             }
             else if (strcmp(message.data, "OFF") == 0)
              {
                 // Işığı kapat
                 printf("Lamba kapaniyor!\n");
+                gpio_set_level(LED_BUILTIN_ESP, 1);
             }
         }
     }
@@ -128,30 +147,38 @@ void light_control_task(void *pvParameter)
 void motor_control_task(void *pvParameter)
 {
     mqtt_message_t message;
+    char motor_command[10]; // Komut için yeterli alan
+    int  motor_turn_percentage    = 0;
+    int result = 0;
+
     while(1)
     {
         // Kuyrukta mesaj gelmesini bekler
         if (xQueueReceive(motor_queue, &message, portMAX_DELAY) == pdPASS)
         {
-            ESP_LOGI("MOTOR_TASK", "Received motor command: %s", message.data);
-            if (strcmp(message.data, "ON") == 0)
+            int result = motor_parse_payload(message.data, motor_command, &motor_turn_percentage);
+            if (result != 2) 
+            {
+                ESP_LOGE("MOTOR_TASK", "Invalid motor command format");
+                continue; // Geçersiz format, sonraki mesaja geç
+                motor_command[0] = '\0';
+                motor_turn_percentage = 0;
+            }
+            ESP_LOGI("MOTOR_TASK", "Received motor command: %s percentage %d", motor_command, motor_turn_percentage);
+            if (strcmp(motor_command, "ON") == 0)
              {
-                // Motoru 3-4 saniye çalıştır
-               // printf("Motor calisiyor...\n");
-               // vTaskDelay(pdMS_TO_TICKS(4000)); // 4 saniye bekleme
-               // printf("Motor durdu.\n");
                printf("Rotating clockwise...\n");
-                for (int i = 0; i < STEPS_PER_REVOLUTION; i++)
+                for (int i = 0; i < STEPS_PER_REVOLUTION * motor_turn_percentage; i++)
                 {
                     motor_step(i % 4, 1);
                     vTaskDelay(pdMS_TO_TICKS(STEP_DELAY_MS));
                 }
             }
-            else if (strcmp(message.data, "OFF") == 0)
+            else if (strcmp(motor_command, "OFF") == 0)
             {
                 // Motoru 2 saniye geri çalıştır
                 printf("Rotating counter-clockwise...\n");
-                for (int i = 0; i < STEPS_PER_REVOLUTION; i++)
+                for (int i = 0; i < STEPS_PER_REVOLUTION * motor_turn_percentage; i++)
                 {
                     motor_step(i % 4, -1);
                     vTaskDelay(pdMS_TO_TICKS(STEP_DELAY_MS));
