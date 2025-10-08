@@ -42,10 +42,23 @@ QueueHandle_t light_queue;
 QueueHandle_t motor_queue;
 
 // MQTT Mesaj Yapısı
-typedef struct {
+typedef struct 
+{
     char topic[50];
     char data[20];
 } mqtt_message_t;
+
+// MQTT Mesaj Yapısı (sscanf ile ayrıştırılmış hali)
+typedef struct 
+{
+    char command[10]; // "ON" veya "OFF"
+    int value;        // Hedef adım sayısı (0 ile 1000 arası)
+} motor_command_t;
+
+// Global Konum Değişkenleri
+int current_position_steps = 0; // Motorun anlık konumu (0: Kapalı, 1000: Açık)
+const int MAX_STEPS = 1000;     // Perdenin tamamen açılması için gereken maksimum adım sayısı
+int target_position_steps = 0;  // Perdenin gitmesi gereken hedef konum
 
 
 
@@ -59,7 +72,7 @@ typedef struct {
 
 // Stepper motor parameters
 #define STEPS_PER_REVOLUTION 100 //1000
-#define STEP_DELAY_MS 10 // Adjust for desired speed
+#define STEP_DELAY_MS 20 // Adjust for desired speed
 
 // Full-step sequence for a bipolar stepper motor
 const int full_step_sequence[4][4] =
@@ -70,7 +83,8 @@ const int full_step_sequence[4][4] =
     {0, 0, 0, 1}  // Step 4
 };
 
-int motor_parse_payload(const char *payload, char *command, int *value) 
+//int motor_parse_payload(const char *payload, char *command, int *value) 
+int motor_parse_payload(const char *payload, int *value) 
 {
     if (payload == NULL)
      {
@@ -78,8 +92,8 @@ int motor_parse_payload(const char *payload, char *command, int *value)
     }
     // "%s %d" formatı: bir dizeyi (komut) ve bir tam sayıyı (değer) oku
     // sscanf, başarıyla okunan değişken sayısını döndürür.
-    int result_count = sscanf(payload, "%s %d", command, value);
-
+    //int result_count = sscanf(payload, "%s %d", command, value);
+    int result_count = sscanf(payload, "%d", value);
     return result_count;
 }
 
@@ -144,51 +158,66 @@ void light_control_task(void *pvParameter)
 }
 
 // Düşük öncelikli motor kontrol görevi
-void motor_control_task(void *pvParameter)
+void motor_control_task(void *pvParameter) 
 {
+    motor_command_t new_command;
     mqtt_message_t message;
-    char motor_command[10]; // Komut için yeterli alan
-    int  motor_turn_percentage    = 0;
-    int result = 0;
+    // Motor pinlerini ayarla (Setup Motor Pins - BURAYA GELECEK)
+    // ...
+    
 
     while(1)
-    {
-        // Kuyrukta mesaj gelmesini bekler
-        if (xQueueReceive(motor_queue, &message, portMAX_DELAY) == pdPASS)
+     {
+        // ADIM 1: YENİ KOMUT KONTROLÜ (KESME)
+        // Kuyrukta yeni bir komut var mı? (Beklemeden kontrol et: 0)
+        if (xQueueReceive(motor_queue, &message, 0) == pdPASS) 
         {
-            int result = motor_parse_payload(message.data, motor_command, &motor_turn_percentage);
-            if (result != 2) 
+            
+            int result = motor_parse_payload(message.data, &new_command.value);
+            if (result == 1) 
             {
-                ESP_LOGE("MOTOR_TASK", "Invalid motor command format");
-                continue; // Geçersiz format, sonraki mesaja geç
-                motor_command[0] = '\0';
-                motor_turn_percentage = 0;
+                // Yeni komuta göre hedefi ayarla
+                target_position_steps = new_command.value;            
+                ESP_LOGW("MOTOR", "new target: %d. current: %d", target_position_steps, current_position_steps);
             }
-            ESP_LOGI("MOTOR_TASK", "Received motor command: %s percentage %d", motor_command, motor_turn_percentage);
-            if (strcmp(motor_command, "ON") == 0)
-             {
-               printf("Rotating clockwise...\n");
-                for (int i = 0; i < STEPS_PER_REVOLUTION * motor_turn_percentage; i++)
-                {
-                    motor_step(i % 4, 1);
-                    vTaskDelay(pdMS_TO_TICKS(STEP_DELAY_MS));
-                }
-            }
-            else if (strcmp(motor_command, "OFF") == 0)
+
+          }      
+
+        // ADIM 2: HAREKET MANTIĞI
+        if (current_position_steps != target_position_steps) 
+        {
+            
+            // Motorun hareket etmesi gereken yönü belirle
+            if (current_position_steps < target_position_steps)
             {
-                // Motoru 2 saniye geri çalıştır
-                printf("Rotating counter-clockwise...\n");
-                for (int i = 0; i < STEPS_PER_REVOLUTION * motor_turn_percentage; i++)
-                {
-                    motor_step(i % 4, -1);
-                    vTaskDelay(pdMS_TO_TICKS(STEP_DELAY_MS));
-                }
+                // AÇILMA YÖNÜ
+                // motor_adimi_at(YUKARI_YON); // Step motor adımı atma fonksiyonunuz
+                motor_step(current_position_steps % 4, 1);
+                current_position_steps++; 
+            } 
+            else 
+            {
+                // KAPANMA YÖNÜ
+                // motor_adimi_at(ASAGI_YON); // Step motor adımı atma fonksiyonunuz
+                motor_step(current_position_steps % 4, 1);
+                current_position_steps--; 
             }
+            
+            // Step motorun hızını ayarlayan kısa bekleme süresi
+            vTaskDelay(pdMS_TO_TICKS(STEP_DELAY_MS));            
+
+        }         
+        else 
+        {
+            // Hedefe ulaşıldı, motoru durdur            
+            // Motor dururken sadece yeni komut bekleyerek işlemci gücünü koru
+            //xQueueReceive(motor_queue, &message, portMAX_DELAY);            
+            vTaskDelay(pdMS_TO_TICKS(100));  
         }
     }
 }
 
-
+// --- MQTT KODLARI ---
 static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
 {
     esp_mqtt_client_handle_t client = event->client;
@@ -247,8 +276,8 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
                 xQueueSend(light_queue, &new_message, 0);
             }
              else if (strcmp(new_message.topic, MQTT_TOPIC_MOTOR) == 0)
-            {
-                xQueueSend(motor_queue, &new_message, 0);
+            {              
+                xQueueSend(motor_queue, &new_message, 0);  
             }
             break;
         case MQTT_EVENT_ERROR:

@@ -20,7 +20,7 @@
 
 // Stepper motor parameters
 #define STEPS_PER_REVOLUTION 1000
-#define STEP_DELAY_MS 10 // Adjust for desired speed
+#define STEP_DELAY_MS 20 // Adjust for desired speed
 
 // Full-step sequence for a bipolar stepper motor
 const int full_step_sequence[4][4] =
